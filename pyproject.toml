@@ -1,0 +1,28 @@
+[project]
+name = "desk-controller"
+version = "0.1.0"
+description = "Control a LINAK / IKEA IDÅSEN standing desk over Bluetooth"
+readme = "README.md"
+authors = [
+    { name = "gdmartins", email = "gdu.martins@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "bleak>=3.0.2",
+]
+
+[project.scripts]
+desk = "desk_controller.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.20,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
