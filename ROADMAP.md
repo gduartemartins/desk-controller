@@ -1,10 +1,12 @@
 # Roadmap
 
-## Now: Omarchy / CLI  ✅ (waiting on hardware)
+## Now: Omarchy / CLI  ✅
 - [x] Bluetooth protocol + `desk` CLI (presets, go-to-height, nudge, stop)
 - [x] Simulated desk (`--fake`) and tests
 - [x] Hyprland keybindings (`SUPER+CTRL+UP/DOWN` etc., in `~/.config/hypr/bindings.lua`)
-- [ ] Verify against the real desk once the TP-Link UB500 arrives (see README "First run")
+- [x] Verified against the real desk (TP-Link UB500)
+- [x] Omarchy add-on: Desk menu (presets, custom height, reminders), `SUPER+CTRL+HOME`
+- [x] Stand/sit reminders (`desk-reminders` user service, click to move / snooze / skip)
 
 ## Next: control from anywhere
 Wanted: use the desk from **iPhone**, **Windows**, and **Home Assistant**.
@@ -27,7 +29,7 @@ through a single always-running service instead of each device connecting itself
 - Optional: an ESP32 next to the desk as the Bluetooth bridge, so it works while this PC is off.
 
 ## Standing schedule
-Stand at set times during the day, e.g. in `config.toml`:
+Basic reminders are done (see README). Ideas for later, e.g. in `config.toml`:
 
 ```toml
 [schedule]

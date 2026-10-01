@@ -174,6 +174,38 @@ async def scan(timeout: float = 8.0) -> list[FoundDesk]:
     return sorted(desks, key=lambda d: d.rssi, reverse=True)
 
 
+async def bluetoothctl(*args: str, timeout: float = 30) -> str:
+    proc = await asyncio.create_subprocess_exec(
+        "bluetoothctl", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+    )
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+    except TimeoutError:
+        proc.kill()
+        raise DeskError(f"bluetoothctl {args[0]} timed out") from None
+    return out.decode(errors="replace")
+
+
+async def bluez_connected(address: str) -> bool:
+    try:
+        return "Connected: yes" in await bluetoothctl("info", address, timeout=5)
+    except (OSError, DeskError):
+        return False
+
+
+async def pair(address: str) -> None:
+    """Pair through bluetoothctl, which brings its own agent (bleak's pair=True needs one running)."""
+    if "Paired: yes" in await bluetoothctl("info", address, timeout=5):
+        return
+    out = await bluetoothctl("--agent", "NoInputNoOutput", "pair", address, timeout=35)
+    if "Pairing successful" not in out and "AlreadyExists" not in out:
+        last = out.strip().splitlines()[-1] if out.strip() else "no output"
+        raise DeskError(
+            f"Pairing failed ({last}). Hold the Bluetooth button on the desk until "
+            "the light blinks blue, then run `desk setup` again."
+        )
+
+
 class BluetoothDesk(Desk):
     def __init__(self, address: str, *, connect_attempts: int = 3, **kwargs):
         super().__init__(**kwargs)
@@ -182,10 +214,17 @@ class BluetoothDesk(Desk):
         self._client: BleakClient | None = None
 
     async def connect(self) -> None:
+        # A desk that's connected doesn't advertise, so bleak can't find it. If the
+        # connection belongs to this PC (BlueZ reconnecting it, or the Omarchy
+        # Bluetooth panel), drop it so we can make our own.
+        if await bluez_connected(self.address):
+            log.info("BlueZ already holds a connection to the desk, releasing it")
+            await bluetoothctl("disconnect", self.address)
+            await asyncio.sleep(1)
         last_error: Exception | None = None
         for attempt in range(1, self.connect_attempts + 1):
             # pair=True lets BlueZ pair on first use; it's a no-op once bonded.
-            client = BleakClient(self.address, pair=True, timeout=20)
+            client = BleakClient(self.address, pair=True, timeout=10)
             try:
                 await client.connect()
             except (BleakError, TimeoutError) as e:
@@ -199,6 +238,11 @@ class BluetoothDesk(Desk):
             except BleakError as e:
                 log.debug("DPG user registration failed (usually harmless): %s", e)
             return
+        if "not found" in str(last_error):
+            raise DeskError(
+                "Desk not found. Is another device connected to it (e.g. the IKEA app "
+                "on a phone)? The desk only accepts one connection at a time."
+            )
         raise DeskError(f"could not connect to {self.address}: {last_error}")
 
     async def disconnect(self) -> None:

@@ -3,6 +3,8 @@
     desk stand | desk sit | desk 105     go to a preset or a height in cm
     desk up / desk down [CM]             nudge (default 2 cm)
     desk status | stop | save NAME | presets | scan | setup [ADDRESS]
+    desk menu                            Omarchy menu: presets, custom height, reminders
+    desk schedule [run]                  show reminders / run the reminder service
 
 Only one command talks to the desk at a time. A new movement command cancels
 one still in progress, so hitting "sit" while it's rising to "stand" just works.
@@ -14,20 +16,23 @@ import fcntl
 import logging
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 
 from bleak.exc import BleakError
 
 from . import desk as desk_mod
+from . import menu, schedule
 from .config import FAKE_STATE_FILE, Config
 from .desk import BluetoothDesk, Desk, DeskError
 from .fake import FakeDesk
 
-COMMANDS = {"go", "up", "down", "stop", "status", "save", "presets", "scan", "setup"}
+COMMANDS = {"go", "up", "down", "stop", "status", "save", "presets", "scan", "setup", "menu", "schedule"}
 PRESET_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
 LOCK_FILE = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "desk-controller.lock"
 
@@ -107,6 +112,8 @@ async def cmd_setup(args, config: Config) -> str:
         address = desks[0].address
 
     config.address = address
+    if not args.fake:
+        await desk_mod.pair(address)
     async with make_desk(config, args.fake) as desk:
         height = await desk.height_mm()
     config.save()
@@ -152,6 +159,21 @@ async def cmd_presets(args, config: Config) -> str:
     return "\n".join(f"{name:<10} {value:g} cm" for name, value in config.presets.items())
 
 
+async def cmd_schedule(args, config: Config) -> str:
+    sched = config.schedule
+    lines = [f"Reminders {'on' if sched.enabled else 'off'}, {', '.join(sched.days) or 'no days'}"]
+    lines += [f"  {t}  {schedule.describe(p, config)}" for t, p in sched.times.items()]
+    upcoming = schedule.next_reminder(sched, datetime.now())
+    if upcoming:
+        lines.append(f"Next: {upcoming[1]} at {upcoming[0]:%a %H:%M}")
+    return "\n".join(lines)
+
+
+def desk_bin() -> str:
+    """How to run this command again from a notification or a timer."""
+    return shutil.which("desk") or os.path.abspath(sys.argv[0])
+
+
 HANDLERS = {
     "scan": (cmd_scan, None),
     "setup": (cmd_setup, "wait"),
@@ -162,6 +184,7 @@ HANDLERS = {
     "stop": (cmd_stop, "takeover"),
     "save": (cmd_save, "wait"),
     "presets": (cmd_presets, None),
+    "schedule": (cmd_schedule, None),
 }
 
 
@@ -186,6 +209,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("save", help="save the current height as a preset")
     p.add_argument("name")
     sub.add_parser("presets", help="list presets")
+    sub.add_parser("menu", help="open the Omarchy desk menu")
+    p = sub.add_parser("schedule", help="show stand/sit reminders, or run the reminder service")
+    p.add_argument("action", nargs="?", choices=["show", "run", "remind", "prompt"], default="show")
+    p.add_argument("preset", nargs="?")
     return parser
 
 
@@ -222,8 +249,15 @@ def main(argv: list[str] | None = None) -> int:
         level=[logging.WARNING, logging.INFO, logging.DEBUG][min(args.verbose, 2)],
         format="%(levelname)s %(name)s: %(message)s",
     )
-    handler, locking = HANDLERS[args.command]
     config = Config.load()
+
+    if args.command == "menu":
+        follow_up = menu.run(config)
+        return main(follow_up) if follow_up else 0
+    if args.command == "schedule" and args.action != "show":
+        return run_schedule(args, config)
+
+    handler, locking = HANDLERS[args.command]
 
     try:
         if locking:
@@ -244,6 +278,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.notify:
         notify(message)
     return 0
+
+
+def run_schedule(args, config: Config) -> int:
+    if args.action == "run":
+        schedule.run(desk_bin())
+        return 0
+    if not args.preset:
+        print(f"desk: `desk schedule {args.action}` needs a preset", file=sys.stderr)
+        return 2
+    if args.action == "remind":
+        schedule.remind(args.preset, config, desk_bin())
+        return 0
+    follow_up = schedule.prompt(args.preset, config, desk_bin())
+    return main(follow_up) if follow_up else 0
 
 
 if __name__ == "__main__":

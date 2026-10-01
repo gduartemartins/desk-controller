@@ -14,6 +14,20 @@ desk presets
 ```
 
 Pressing a new command while the desk is moving cancels the old one.
+
+## Omarchy add-on
+
+`omarchy/install.sh` adds a **Desk** entry to the Omarchy menu (also `SUPER+CTRL+HOME`,
+or `desk menu`):
+
+- **Presets**: go to sit / stand (or a third one like *focus*); set a preset's height by
+  typing it, save the desk's current height as a preset, add or remove presets.
+- **Go to height…**: type any height in cm.
+- **Reminders**: times of day to stand or sit, on chosen days. At each time a notification
+  appears; click it to move the desk, snooze 10/30 min, or skip. The desk never moves on
+  its own. Reminders run in the `desk-reminders` systemd user service.
+
+`desk schedule` prints the reminder schedule.
 Config lives in `~/.config/desk-controller/config.toml`.
 
 Hyprland keybindings (in `~/.config/hypr/bindings.lua`):
@@ -23,17 +37,20 @@ Hyprland keybindings (in `~/.config/hypr/bindings.lua`):
 | `SUPER+CTRL+UP` / `DOWN` | stand / sit |
 | `SUPER+CTRL+ALT+UP` / `DOWN` | nudge 2 cm |
 | `SUPER+CTRL+END` | stop |
+| `SUPER+CTRL+HOME` | desk menu |
 
 ## Status
 
-Built and tested against a simulated desk; not yet tried on real hardware
-(this PC needs a Bluetooth adapter, a TP-Link UB500 is on its way).
+Working on the real desk ("Desk 9160") through a TP-Link UB500 adapter.
+The desk accepts one Bluetooth connection at a time: while the IKEA app on a phone is
+connected, `desk` reports "Desk not found". If this PC's own Bluetooth stack holds the
+connection (e.g. after connecting from the Omarchy Bluetooth panel), `desk` releases it.
 
 ## Next actions
 
-1. **Verify on the real desk**: pair, check height reading and movement (steps below).
-   If something doesn't respond, compare `desk -vv ...` logs with the protocol notes.
-2. **Set real presets**: `desk save sit` / `desk save stand` at comfortable heights.
+1. **Check height calibration**: the IKEA app shows 1 cm more than `desk` (83 vs 82).
+   Measure the desktop; if the app is right, set `base_height_mm = 630` in the config.
+2. **Set real presets** from the Desk menu, and turn reminders on.
 3. **`desk serve` daemon**: keep one Bluetooth connection open and expose an HTTP API,
    so the desk can be controlled from other devices.
 4. **iPhone / Windows**: mobile-friendly web page served by the daemon, plus Apple Shortcuts.
