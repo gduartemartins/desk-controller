@@ -2,15 +2,26 @@ import asyncio
 import concurrent.futures
 import threading
 import time
-import tkinter as tk
+from datetime import datetime, timedelta
 
 import pytest
 
+tk = pytest.importorskip("tkinter")
+
 from desk_controller import desk as desk_mod, protocol, windows
-from desk_controller.config import Config
+from desk_controller.config import WEEKDAYS, Config
 from desk_controller.fake import FakeDesk
 from desk_controller.windows_session import DeskSession
 from desk_controller.windows_worker import BusyError, DeskWorker
+
+
+class FakeTray:
+    def __init__(self, dispatch):
+        self.dispatch = dispatch
+        self.stopped = False
+
+    def stop(self):
+        self.stopped = True
 
 
 @pytest.mark.parametrize("text, expected", [("62", 62), ("127", 127), ("98,5", 98.5)])
@@ -147,7 +158,7 @@ def test_gui_simulator_setup_move_and_presets(monkeypatch, tmp_path):
     monkeypatch.setattr(windows, "FAKE_STATE_FILE", tmp_path / "fake.json")
     errors = []
     monkeypatch.setattr(windows.messagebox, "showerror", lambda *args, **kwargs: errors.append(args))
-    app = windows.WindowsApp(root, fake=True)
+    app = windows.WindowsApp(root, fake=True, tray_factory=FakeTray)
     created = []
 
     def make_desk(address=None):
@@ -171,6 +182,8 @@ def test_gui_simulator_setup_move_and_presets(monkeypatch, tmp_path):
         app.height.set("75")
         app.go_height()
         wait_for("Desk at")
+        assert app.current_height.get() == "75.0 cm"
+        assert app.height_progress.get() == pytest.approx(20)
         app.preset.set("focus")
         app.save_current()
         wait_for("Saved focus")
@@ -180,14 +193,45 @@ def test_gui_simulator_setup_move_and_presets(monkeypatch, tmp_path):
         assert Config.load(windows.CONFIG_FILE).schedule.times["09:15"] == "focus"
         assert len(created) == 1
         assert created[0].connected
+        app.hide()
+        root.update()
+        assert not root.winfo_viewable()
+        app.tray.dispatch("show")
+        deadline = time.monotonic() + 2
+        while not root.winfo_viewable() and time.monotonic() < deadline:
+            root.update()
+            time.sleep(0.01)
+        assert root.winfo_viewable()
+        app.current_height.set("--.- cm")
+        app._refresh_live_height()
+        deadline = time.monotonic() + 2
+        while app.current_height.get() == "--.- cm" and time.monotonic() < deadline:
+            root.update()
+            time.sleep(0.01)
+        assert app.current_height.get() == "75.0 cm"
+        assert app.height_progress.get() == pytest.approx(20)
+        app.hide()
+        reminders = []
+        monkeypatch.setattr(app, "show_reminder", reminders.append)
+        now = datetime.now()
+        app.last_check = now.replace(second=0, microsecond=0) - timedelta(seconds=1)
+        app.config.schedule.enabled = True
+        app.config.schedule.days = [WEEKDAYS[now.weekday()]]
+        app.config.schedule.times = {now.strftime("%H:%M"): "stand"}
+        app._check_reminders()
+        assert reminders == ["stand"]
+        app.tray.dispatch("stop")
+        wait_for("Stopped at")
+        assert not root.winfo_viewable()
     finally:
         app.close()
         deadline = time.monotonic() + 5
-        while app.worker.thread.is_alive() and time.monotonic() < deadline:
+        while not app.tray.stopped and time.monotonic() < deadline:
             root.update()
             time.sleep(0.01)
         assert not app.worker.thread.is_alive()
         assert not created[0].connected
+        assert app.tray.stopped
         try:
             root.destroy()
         except tk.TclError:

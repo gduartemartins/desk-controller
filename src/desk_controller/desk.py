@@ -4,6 +4,7 @@ import asyncio
 import logging
 import sys
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from bleak import BleakClient, BleakScanner
@@ -97,6 +98,7 @@ class Desk(ABC):
         stall_polls: int = 5,
         max_retries: int = 3,
         timeout: float = 60.0,
+        on_state: Callable[[DeskState], None] | None = None,
     ) -> float:
         """Drive the desk to target_mm and return the height it settled at.
 
@@ -126,6 +128,8 @@ class Desk(ABC):
                         await asyncio.sleep(poll_interval)
                         state = await self.state()
                         log.debug("height=%.1fmm speed=%.1fmm/s", state.height_mm, state.speed_mm_s)
+                        if on_state is not None:
+                            on_state(state)
 
                         if state.speed_mm_s != 0:
                             still = 0

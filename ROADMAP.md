@@ -8,11 +8,18 @@
 - [x] Omarchy add-on: Desk menu (presets, custom height, reminders), `SUPER+CTRL+HOME`
 - [x] Stand/sit reminders (`desk-reminders` user service, click to move / snooze / skip)
 
-## Next: control from anywhere
-Wanted: use the desk from **iPhone**, **Windows**, and **Home Assistant**.
+## Windows desktop app
+- [x] Direct Bluetooth control with a persistent connection, presets and current height
+- [x] Notification-area icon and opt-in stand/sit reminders while the app is running
+- [x] Simulator mode and shared protocol tests
 
-The desk accepts only one Bluetooth connection at a time, so everything should go
-through a single always-running service instead of each device connecting itself:
+## Next: control from anywhere
+Wanted: use the desk from **iPhone** and **Home Assistant**, with optional access
+from Windows through a browser.
+
+The desk accepts only one Bluetooth connection at a time. For simultaneous remote
+access, clients could use a single always-running service instead of connecting
+independently (including the existing Windows desktop app):
 
 - `desk serve`: daemon on this PC that keeps the Bluetooth connection open
   (faster moves, live height) and exposes a small HTTP API on the LAN
@@ -20,7 +27,7 @@ through a single always-running service instead of each device connecting itself
 - The CLI and keybindings talk to the daemon when it's running.
 - **iPhone**: a mobile-friendly web page served by the daemon (add to home screen),
   and/or Apple Shortcuts calling the API (lets Siri say "stand up").
-- **Windows**: same web page in a browser; no install needed.
+- **Windows**: optionally use the same web page in a browser instead of the desktop app.
 - **Home Assistant**: either
   - REST/MQTT integration pointing at the daemon (keeps this PC as the Bluetooth hub), or
   - HA's built-in *IKEA Idasen Desk* integration, if HA gets its own Bluetooth

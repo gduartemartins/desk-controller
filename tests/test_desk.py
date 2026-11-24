@@ -39,6 +39,15 @@ async def test_move_to_arrives(start, target):
         assert landed == pytest.approx(target, abs=1)
 
 
+async def test_movement_reports_live_height():
+    updates = []
+    async with fast_desk(height_mm=720) as desk:
+        await desk.move_to(800, on_state=updates.append, **FAST)
+    assert len(updates) > 1
+    assert updates[0].height_mm < updates[-1].height_mm
+    assert updates[-1].height_mm == pytest.approx(800, abs=1)
+
+
 async def test_move_to_out_of_range():
     async with fast_desk() as desk:
         with pytest.raises(ValueError):
