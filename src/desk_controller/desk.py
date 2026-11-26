@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -110,41 +111,44 @@ class Desk(ABC):
             )
 
         payload = protocol.encode_height(target_mm, self.base_height_mm)
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout
         still = 0
         retries = 0
         arrived = False
 
-        await self.wakeup()
-        await self._write_command(protocol.COMMAND_STOP)
         try:
-            while True:
-                await self._write_reference(payload)
-                await asyncio.sleep(poll_interval)
-                state = await self.state()
-                log.debug("height=%.1fmm speed=%.1fmm/s", state.height_mm, state.speed_mm_s)
-
-                if state.speed_mm_s != 0:
-                    still = 0
-                    continue
-                if abs(state.height_mm - target_mm) <= TOLERANCE_MM:
-                    arrived = True
-                    return state.height_mm
-
-                still += 1
-                if still >= stall_polls:
-                    retries += 1
-                    if retries > max_retries:
-                        raise DeskStalled(
-                            f"desk stopped at {state.height_mm / 10:.1f} cm "
-                            f"before reaching {target_mm / 10:.1f} cm"
-                        )
-                    log.info("desk not moving, retrying (%d/%d)", retries, max_retries)
-                    still = 0
+            deadline = asyncio.timeout(timeout)
+            try:
+                async with deadline:
                     await self.wakeup()
-                if loop.time() > deadline:
-                    raise DeskError(f"timed out after {timeout:.0f}s")
+                    await self._write_command(protocol.COMMAND_STOP)
+                    while True:
+                        await self._write_reference(payload)
+                        await asyncio.sleep(poll_interval)
+                        state = await self.state()
+                        log.debug("height=%.1fmm speed=%.1fmm/s", state.height_mm, state.speed_mm_s)
+
+                        if state.speed_mm_s != 0:
+                            still = 0
+                            continue
+                        if abs(state.height_mm - target_mm) <= TOLERANCE_MM:
+                            arrived = True
+                            return state.height_mm
+
+                        still += 1
+                        if still >= stall_polls:
+                            retries += 1
+                            if retries > max_retries:
+                                raise DeskStalled(
+                                    f"desk stopped at {state.height_mm / 10:.1f} cm "
+                                    f"before reaching {target_mm / 10:.1f} cm"
+                                )
+                            log.info("desk not moving, retrying (%d/%d)", retries, max_retries)
+                            still = 0
+                            await self.wakeup()
+            except TimeoutError:
+                if deadline.expired():
+                    raise DeskError(f"timed out after {timeout:g}s") from None
+                raise
         finally:
             if not arrived:
                 await asyncio.shield(self._safe_stop())
@@ -213,20 +217,27 @@ class BluetoothDesk(Desk):
         self.connect_attempts = connect_attempts
         self._client: BleakClient | None = None
 
+    @property
+    def connected(self) -> bool:
+        return self._client is not None and self._client.is_connected
+
     async def connect(self) -> None:
         # A desk that's connected doesn't advertise, so bleak can't find it. If the
         # connection belongs to this PC (BlueZ reconnecting it, or the Omarchy
         # Bluetooth panel), drop it so we can make our own.
-        if await bluez_connected(self.address):
+        if sys.platform.startswith("linux") and await bluez_connected(self.address):
             log.info("BlueZ already holds a connection to the desk, releasing it")
             await bluetoothctl("disconnect", self.address)
             await asyncio.sleep(1)
         last_error: Exception | None = None
         for attempt in range(1, self.connect_attempts + 1):
-            # pair=True lets BlueZ pair on first use; it's a no-op once bonded.
+            # Bleak pairs on first use on both BlueZ and Windows.
             client = BleakClient(self.address, pair=True, timeout=10)
             try:
                 await client.connect()
+            except asyncio.CancelledError:
+                await asyncio.shield(client.disconnect())
+                raise
             except (BleakError, TimeoutError) as e:
                 last_error = e
                 log.info("connect attempt %d failed: %s", attempt, e)

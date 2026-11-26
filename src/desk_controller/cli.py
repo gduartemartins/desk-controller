@@ -12,7 +12,6 @@ one still in progress, so hitting "sit" while it's rising to "stand" just works.
 
 import argparse
 import asyncio
-import fcntl
 import logging
 import os
 import re
@@ -23,6 +22,9 @@ import sys
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+
+if sys.platform != "win32":
+    import fcntl
 
 from bleak.exc import BleakError
 
@@ -244,6 +246,9 @@ async def run(handler, args, config: Config) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if sys.platform == "win32":
+        print("desk: the CLI is Linux-only; use desk-windows instead.", file=sys.stderr)
+        return 1
     args = build_parser().parse_args(normalize_argv(sys.argv[1:] if argv is None else argv))
     logging.basicConfig(
         level=[logging.WARNING, logging.INFO, logging.DEBUG][min(args.verbose, 2)],

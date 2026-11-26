@@ -5,7 +5,7 @@ import pytest
 from desk_controller import protocol
 from desk_controller.cli import normalize_argv, resolve_target, UserError
 from desk_controller.config import Config
-from desk_controller.desk import DeskStalled
+from desk_controller.desk import DeskError, DeskStalled
 from desk_controller.fake import FakeDesk
 
 FAST = dict(poll_interval=0.01, stall_polls=3)
@@ -65,6 +65,30 @@ async def test_cancel_stops_desk():
         await asyncio.sleep(0.1)
         assert (await desk.height_mm()) == pytest.approx(stopped_at, abs=0.1)
         assert 720 < stopped_at < 1200
+
+
+async def test_timeout_stops_even_while_desk_is_moving():
+    async with FakeDesk(height_mm=720, speed_mm_s=100) as desk:
+        with pytest.raises(DeskError, match="timed out"):
+            await desk.move_to(1200, poll_interval=0.01, timeout=0.1)
+        stopped_at = desk.position_mm
+        assert stopped_at > 720
+        await asyncio.sleep(0.05)
+        assert await desk.height_mm() == pytest.approx(stopped_at, abs=0.1)
+
+
+async def test_timeout_interrupts_stalled_read_and_sends_stop():
+    class StuckReadDesk(FakeDesk):
+        async def _read_height(self):
+            await asyncio.sleep(10)
+
+    async with StuckReadDesk(height_mm=720, speed_mm_s=100) as desk:
+        with pytest.raises(DeskError, match="timed out"):
+            await desk.move_to(1200, poll_interval=0.01, timeout=0.1)
+        stopped_at = desk.position_mm
+        await asyncio.sleep(0.05)
+        desk._advance()
+        assert desk.position_mm == pytest.approx(stopped_at, abs=0.1)
 
 
 async def test_desk_stops_without_keepalive():
